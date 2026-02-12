@@ -20,33 +20,65 @@
 <section class="cidadao">
     <h2>Solicitação de Serviço</h2>
 
-    <form id="formSolicitacao">
-        <input type="text" placeholder="Nome Completo" required>
-        <input type="email" placeholder="E-mail" required>
-        <input type="text" placeholder="Telefone" required>
-        <select required>
+    <form id="formSolicitacao" 
+          action="https://formsubmit.co/SEUEMAIL@gmail.com" 
+          method="POST"
+          onsubmit="gerarProtocolo()">
+
+        <!-- Configuração FormSubmit -->
+        <input type="hidden" name="_captcha" value="false">
+        <input type="hidden" name="_subject" value="Nova Solicitação - CBM">
+        <input type="hidden" name="_template" value="table">
+        <input type="hidden" name="Protocolo" id="protocoloHidden">
+
+        <input type="text" name="Nome" placeholder="Nome Completo" required>
+        <input type="email" name="Email" placeholder="E-mail" required>
+        <input type="text" name="Telefone" placeholder="Telefone" required>
+
+        <select name="Tipo de Solicitação" required>
             <option value="">Tipo de Solicitação</option>
             <option>Vistoria Técnica</option>
             <option>Denúncia</option>
             <option>Ocorrência</option>
             <option>Informação</option>
         </select>
-        <textarea placeholder="Descreva sua solicitação" required></textarea>
+
+        <textarea name="Descrição" placeholder="Descreva sua solicitação" required></textarea>
+
         <button type="submit">Enviar Solicitação</button>
     </form>
 
     <div class="protocolo-box">
         <h3>Consultar Protocolo</h3>
-        <input type="text" id="protocoloInput" placeholder="Digite seu número de protocolo">
+        <input type="text" id="consultaProtocolo" placeholder="Digite seu número de protocolo">
         <button onclick="consultarProtocolo()">Consultar</button>
-        <p id="resultadoProtocolo"></p>
+        <p id="resultadoConsulta"></p>
     </div>
+
 </section>
 
 <footer>
     <p>© 2026 CBM - Todos os direitos reservados</p>
 </footer>
 
-<script src="cidadao.js"></script>
+<script>
+function gerarProtocolo() {
+    const protocolo = Math.floor(Math.random() * 1000000);
+    document.getElementById("protocoloHidden").value = protocolo;
+    alert("Solicitação enviada com sucesso!\nSeu protocolo é: " + protocolo);
+}
+
+function consultarProtocolo() {
+    const numero = document.getElementById("consultaProtocolo").value;
+    const resultado = document.getElementById("resultadoConsulta");
+
+    if(numero === ""){
+        resultado.innerText = "Digite um número válido.";
+    } else {
+        resultado.innerText = "Protocolo " + numero + " está em análise.";
+    }
+}
+</script>
+
 </body>
 </html>
