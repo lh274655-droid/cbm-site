@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hierarquia Militar - CBM</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #111;
+    color: white;
+}
+
+/* HEADER */
+
+.header-top {
+    background: linear-gradient(90deg, #b30000, #800000);
+    padding: 25px;
+    text-align: center;
+    position: relative;
+}
+
+.btn-voltar {
+    position: absolute;
+    left: 20px;
+    top: 25px;
+    background: black;
+    color: white;
+    padding: 8px 15px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: 0.3s;
+}
+
+.btn-voltar:hover {
+    background: #333;
+}
+
+/* CONTAINER */
+
+.hierarquia-container {
+    padding: 50px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.titulo-grupo {
+    margin-top: 40px;
+    margin-bottom: 20px;
+    color: #ff3333;
+    border-bottom: 2px solid #b30000;
+    width: 420px;
+    text-align: center;
+    padding-bottom: 5px;
+}
+
+.grupo {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.cargo {
+    width: 400px;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: bold;
+    transition: 0.3s;
+    cursor: pointer;
+}
+
+.comando { background: gold; color: black; }
+.superior { background: #cc0000; }
+.intermediario { background: #b30000; }
+.subalterno { background: #990000; }
+.especial { background: #333; border: 1px solid #b30000; }
+.praca { background: #1a1a1a; border: 1px solid #444; }
+
+.cargo:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px red;
+}
+
+footer {
+    background: black;
+    text-align: center;
+    padding: 20px;
+    margin-top: 40px;
+}
+</style>
+
+</head>
+<body>
+
+<header class="header-top">
+    <a href="index.html" class="btn-voltar">⬅ Voltar</a>
+    <h1>🔥 Hierarquia Militar Completa</h1>
+</header>
+
+<section class="hierarquia-container">
+
+    <h2 class="titulo-grupo">👑 COMANDO</h2>
+    <div class="grupo">
+        <div class="cargo comando">Comandante Geral</div>
+        <div class="cargo comando">Subcomandante Geral</div>
+        <div class="cargo comando">Chefe do Estado-Maior</div>
+    </div>
+
+    <h2 class="titulo-grupo">🎖 OFICIAIS SUPERIORES</h2>
+    <div class="grupo">
+        <div class="cargo superior">Coronel</div>
+        <div class="cargo superior">Tenente-Coronel</div>
+        <div class="cargo superior">Major</div>
+    </div>
+
+    <h2 class="titulo-grupo">🎖 OFICIAIS INTERMEDIÁRIOS</h2>
+    <div class="grupo">
+        <div class="cargo intermediario">Capitão</div>
+    </div>
+
+    <h2 class="titulo-grupo">🎖 OFICIAIS SUBALTERNOS</h2>
+    <div class="grupo">
+        <div class="cargo subalterno">1º Tenente</div>
+        <div class="cargo subalterno">2º Tenente</div>
+    </div>
+
+    <h2 class="titulo-grupo">🔰 PRAÇAS ESPECIAIS</h2>
+    <div class="grupo">
+        <div class="cargo especial">Aspirante a Oficial</div>
+        <div class="cargo especial">Aluno Oficial</div>
+    </div>
+
+    <h2 class="titulo-grupo">🔰 PRAÇAS</h2>
+    <div class="grupo">
+        <div class="cargo praca">Subtenente</div>
+        <div class="cargo praca">1º Sargento</div>
+        <div class="cargo praca">2º Sargento</div>
+        <div class="cargo praca">3º Sargento</div>
+        <div class="cargo praca">Cabo</div>
+        <div class="cargo praca">Soldado</div>
+    </div>
+
+</section>
+
+<footer>
+    <p>© 2026 CBM - Todos os direitos reservados</p>
+</footer>
+
+</body>
+</html>

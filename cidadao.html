@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Área do Cidadão - CBM</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topo">
+    <div class="logo">🔥 CBM - Área do Cidadão</div>
+    <nav>
+        <ul>
+            <li><a href="index.html">Início</a></li>
+        </ul>
+    </nav>
+</header>
+
+<section class="cidadao">
+    <h2>Solicitação de Serviço</h2>
+
+    <form id="formSolicitacao">
+        <input type="text" placeholder="Nome Completo" required>
+        <input type="email" placeholder="E-mail" required>
+        <input type="text" placeholder="Telefone" required>
+        <select required>
+            <option value="">Tipo de Solicitação</option>
+            <option>Vistoria Técnica</option>
+            <option>Denúncia</option>
+            <option>Ocorrência</option>
+            <option>Informação</option>
+        </select>
+        <textarea placeholder="Descreva sua solicitação" required></textarea>
+        <button type="submit">Enviar Solicitação</button>
+    </form>
+
+    <div class="protocolo-box">
+        <h3>Consultar Protocolo</h3>
+        <input type="text" id="protocoloInput" placeholder="Digite seu número de protocolo">
+        <button onclick="consultarProtocolo()">Consultar</button>
+        <p id="resultadoProtocolo"></p>
+    </div>
+</section>
+
+<footer>
+    <p>© 2026 CBM - Todos os direitos reservados</p>
+</footer>
+
+<script src="cidadao.js"></script>
+</body>
+</html>
