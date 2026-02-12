@@ -54,7 +54,7 @@ nav a:hover {
 /* ========================= */
 
 .hero {
-    background: url('img/banner1.jpg') center/cover no-repeat;
+    background: url('banner1.jpg') center/cover no-repeat;
     height: 450px;
     position: relative;
 }
@@ -297,3 +297,4 @@ footer {
     padding: 20px;
     margin-top: 40px;
 }
+
