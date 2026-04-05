@@ -1,6 +1,7 @@
 {
   "name": "cbm-bot",
   "version": "1.0.0",
+  "description": "Bot Discord com ticket, entrada e saída",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
