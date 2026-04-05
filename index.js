@@ -17,21 +17,23 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-const CANAL_ENTRADA_ID = process.env.CANAL_ENTRADA_ID || "";
-const CANAL_SAIDA_ID = process.env.CANAL_SAIDA_ID || "";
+const CANAL_PAINEL_ID = process.env.CANAL_PAINEL_ID || "";
 const CATEGORIA_TICKETS_ID = process.env.CATEGORIA_TICKETS_ID || "";
 const CARGO_ATENDIMENTO_ID = process.env.CARGO_ATENDIMENTO_ID || "";
-const CARGO_MEMBRO_ID = process.env.CARGO_MEMBRO_ID || "";
 
-if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
-  console.error("Faltam variáveis obrigatórias: TOKEN, CLIENT_ID e GUILD_ID");
+// Se quiser fixar manualmente o ID da mensagem do painel, coloque no Render:
+// MENSAGEM_PAINEL_ID=123456789012345678
+let MENSAGEM_PAINEL_ID = process.env.MENSAGEM_PAINEL_ID || "";
+
+if (!TOKEN || !CLIENT_ID || !GUILD_ID || !CANAL_PAINEL_ID) {
+  console.error("Faltam variáveis obrigatórias:");
+  console.error("TOKEN, CLIENT_ID, GUILD_ID, CANAL_PAINEL_ID");
   process.exit(1);
 }
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
   ],
   partials: [Partials.Channel],
@@ -42,7 +44,7 @@ const ticketsEmCriacao = new Set();
 const commands = [
   new SlashCommandBuilder()
     .setName("painel")
-    .setDescription("Envia o painel de tickets"),
+    .setDescription("Cria ou atualiza o painel fixo de ticket"),
 
   new SlashCommandBuilder()
     .setName("fechar")
@@ -63,9 +65,17 @@ async function registrarComandos() {
 function criarEmbedPainel() {
   return new EmbedBuilder()
     .setTitle("🎫 Central de Atendimento")
-    .setDescription("Clique no botão abaixo para abrir seu ticket.")
+    .setDescription(
+      [
+        "Clique no botão abaixo para abrir seu ticket.",
+        "",
+        "• Um ticket por usuário",
+        "• Atendimento privado",
+        "• Use apenas quando realmente precisar"
+      ].join("\n")
+    )
     .setColor(0xff2b2b)
-    .setFooter({ text: "CBM BOT" })
+    .setFooter({ text: "CBM BOT • Painel Fixo" })
     .setTimestamp();
 }
 
@@ -89,17 +99,91 @@ function criarBotaoFechar() {
   );
 }
 
-function nomeTicket(user) {
-  return `ticket-${user.id}`;
+function nomeTicket(userId) {
+  return `ticket-${userId}`;
 }
 
 async function procurarTicketAberto(guild, userId) {
   const channels = await guild.channels.fetch();
+
   return channels.find(channel =>
     channel &&
     channel.type === ChannelType.GuildText &&
-    channel.name === `ticket-${userId}`
+    channel.name === nomeTicket(userId)
   );
+}
+
+async function obterCanalPainel(guild) {
+  const channel = await guild.channels.fetch(CANAL_PAINEL_ID).catch(() => null);
+
+  if (!channel || !channel.isTextBased()) {
+    throw new Error("CANAL_PAINEL_ID inválido ou canal não é de texto.");
+  }
+
+  return channel;
+}
+
+async function criarOuAtualizarPainelFixo(guild) {
+  const canalPainel = await obterCanalPainel(guild);
+  const embed = criarEmbedPainel();
+  const components = [criarBotoesPainel()];
+
+  // 1) Se tiver ID salvo, tenta editar a mensagem existente
+  if (MENSAGEM_PAINEL_ID) {
+    const mensagemExistente = await canalPainel.messages.fetch(MENSAGEM_PAINEL_ID).catch(() => null);
+
+    if (mensagemExistente) {
+      await mensagemExistente.edit({
+        embeds: [embed],
+        components,
+      });
+
+      return {
+        type: "updated",
+        message: mensagemExistente,
+      };
+    }
+  }
+
+  // 2) Procura um painel antigo enviado pelo bot nesse canal
+  const mensagens = await canalPainel.messages.fetch({ limit: 30 }).catch(() => null);
+
+  if (mensagens) {
+    const painelAntigo = mensagens.find(msg =>
+      msg.author.id === client.user.id &&
+      msg.embeds.length > 0 &&
+      msg.embeds[0].title === "🎫 Central de Atendimento"
+    );
+
+    if (painelAntigo) {
+      await painelAntigo.edit({
+        embeds: [embed],
+        components,
+      });
+
+      MENSAGEM_PAINEL_ID = painelAntigo.id;
+      console.log(`Painel fixo atualizado. ID da mensagem: ${MENSAGEM_PAINEL_ID}`);
+
+      return {
+        type: "updated",
+        message: painelAntigo,
+      };
+    }
+  }
+
+  // 3) Se não existir, cria novo
+  const novaMensagem = await canalPainel.send({
+    embeds: [embed],
+    components,
+  });
+
+  MENSAGEM_PAINEL_ID = novaMensagem.id;
+  console.log(`Painel fixo criado. ID da mensagem: ${MENSAGEM_PAINEL_ID}`);
+
+  return {
+    type: "created",
+    message: novaMensagem,
+  };
 }
 
 async function criarTicket(interaction) {
@@ -152,7 +236,7 @@ async function criarTicket(interaction) {
     }
 
     const channel = await guild.channels.create({
-      name: nomeTicket(user),
+      name: nomeTicket(user.id),
       type: ChannelType.GuildText,
       parent: CATEGORIA_TICKETS_ID || null,
       permissionOverwrites,
@@ -202,52 +286,10 @@ client.once("ready", async () => {
 
   try {
     await registrarComandos();
+    const guild = await client.guilds.fetch(GUILD_ID);
+    await criarOuAtualizarPainelFixo(guild);
   } catch (error) {
-    console.error("Erro ao registrar comandos:", error);
-  }
-});
-
-client.on("guildMemberAdd", async (member) => {
-  try {
-    if (CARGO_MEMBRO_ID) {
-      await member.roles.add(CARGO_MEMBRO_ID).catch(() => null);
-    }
-
-    if (!CANAL_ENTRADA_ID) return;
-
-    const channel = await member.guild.channels.fetch(CANAL_ENTRADA_ID).catch(() => null);
-    if (!channel || !channel.isTextBased()) return;
-
-    const embed = new EmbedBuilder()
-      .setTitle("✅ Entrada Automática")
-      .setDescription(`${member} entrou no servidor.`)
-      .setThumbnail(member.user.displayAvatarURL())
-      .setColor(0x57f287)
-      .setTimestamp();
-
-    await channel.send({ embeds: [embed] }).catch(() => null);
-  } catch (error) {
-    console.error("Erro em guildMemberAdd:", error);
-  }
-});
-
-client.on("guildMemberRemove", async (member) => {
-  try {
-    if (!CANAL_SAIDA_ID) return;
-
-    const channel = await member.guild.channels.fetch(CANAL_SAIDA_ID).catch(() => null);
-    if (!channel || !channel.isTextBased()) return;
-
-    const embed = new EmbedBuilder()
-      .setTitle("📤 Saída Automática")
-      .setDescription(`**${member.user.tag}** saiu do servidor.`)
-      .setThumbnail(member.user.displayAvatarURL())
-      .setColor(0xed4245)
-      .setTimestamp();
-
-    await channel.send({ embeds: [embed] }).catch(() => null);
-  } catch (error) {
-    console.error("Erro em guildMemberRemove:", error);
+    console.error("Erro no ready:", error);
   }
 });
 
@@ -255,9 +297,15 @@ client.on("interactionCreate", async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === "painel") {
-        await interaction.reply({
-          embeds: [criarEmbedPainel()],
-          components: [criarBotoesPainel()],
+        await interaction.deferReply({ ephemeral: true });
+
+        const resultado = await criarOuAtualizarPainelFixo(interaction.guild);
+
+        await interaction.editReply({
+          content:
+            resultado.type === "created"
+              ? `✅ Painel fixo criado com sucesso: ${resultado.message.url}`
+              : `✅ Painel fixo atualizado com sucesso: ${resultado.message.url}`,
         });
         return;
       }
@@ -298,7 +346,6 @@ client.on("interactionCreate", async (interaction) => {
 
         await interaction.reply({
           content: "🔒 Fechando ticket em 3 segundos...",
-          ephemeral: false,
         });
 
         setTimeout(async () => {
