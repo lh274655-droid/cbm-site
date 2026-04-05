@@ -1,7 +1,7 @@
 {
   "name": "cbm-bot",
   "version": "1.0.0",
-  "description": "Bot Discord com painel fixo, tickets, assumir, fechar com motivo, transcript PDF e reabrir",
+  "description": "Bot Discord com painel fixo, formulário por tipo, tickets, assumir, fechar com motivo, transcript PDF, reabrir e web server",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "discord.js": "^14.14.1",
+    "express": "^4.21.2",
     "pdfkit": "^0.15.0"
   }
 }
