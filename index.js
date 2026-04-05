@@ -13,23 +13,22 @@ const {
   Routes,
   AttachmentBuilder,
 } = require("discord.js");
-
 const PDFDocument = require("pdfkit");
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-const CANAL_PAINEL_ID = process.env.CANAL_PAINEL_ID || "";
+const CANAL_PAINEL_ID = process.env.CANAL_PAINEL_ID;
 const CATEGORIA_TICKETS_ID = process.env.CATEGORIA_TICKETS_ID || "";
 const CARGO_ATENDIMENTO_ID = process.env.CARGO_ATENDIMENTO_ID || "";
 const CANAL_TRANSCRIPT_ID = process.env.CANAL_TRANSCRIPT_ID || "";
 const PAINEL_IMAGEM_URL = process.env.PAINEL_IMAGEM_URL || "";
-const PAINEL_TITULO = process.env.PAINEL_TITULO || "🎫 CENTRAL DE ATENDIMENTO";
+const PAINEL_TITULO = process.env.PAINEL_TITULO || "🎫 Central de Atendimento";
 const PAINEL_TEXTO =
   process.env.PAINEL_TEXTO ||
   "Clique no botão abaixo para abrir seu ticket.\n\n• Um ticket por usuário\n• Atendimento privado\n• Aguarde a equipe assumir";
-let MENSAGEM_PAINEL_ID = process.env.MENSAGEM_PAINEL_ID || "";
+const MENSAGEM_PAINEL_ID = process.env.MENSAGEM_PAINEL_ID || "";
 
 if (!TOKEN || !CLIENT_ID || !GUILD_ID || !CANAL_PAINEL_ID) {
   console.error("Faltam variáveis obrigatórias:");
@@ -51,36 +50,32 @@ const ticketsEmCriacao = new Set();
 const commands = [
   new SlashCommandBuilder()
     .setName("painel")
-    .setDescription("Cria ou atualiza o painel fixo de ticket"),
-
-  new SlashCommandBuilder()
-    .setName("fechar")
-    .setDescription("Fecha o ticket atual"),
-
+    .setDescription("Cria ou atualiza o painel fixo"),
   new SlashCommandBuilder()
     .setName("assumir")
     .setDescription("Assume o ticket atual"),
-].map((cmd) => cmd.toJSON());
+  new SlashCommandBuilder()
+    .setName("fechar")
+    .setDescription("Fecha o ticket atual com transcript em PDF"),
+].map((c) => c.toJSON());
 
 async function registrarComandos() {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
     body: commands,
   });
-  console.log("Comandos registrados com sucesso.");
+  console.log("✅ Comandos registrados.");
 }
 
 function criarEmbedPainel() {
   const embed = new EmbedBuilder()
     .setTitle(PAINEL_TITULO)
     .setDescription(PAINEL_TEXTO)
-    .setColor(0x0b5ed7)
+    .setColor(0xff2b2b)
     .setFooter({ text: "CBM BOT • Painel Fixo" })
     .setTimestamp();
 
-  if (PAINEL_IMAGEM_URL) {
-    embed.setImage(PAINEL_IMAGEM_URL);
-  }
+  if (PAINEL_IMAGEM_URL) embed.setImage(PAINEL_IMAGEM_URL);
 
   return embed;
 }
@@ -91,7 +86,7 @@ function criarBotoesPainel() {
       .setCustomId("abrir_ticket")
       .setLabel("Abrir Ticket")
       .setEmoji("🎫")
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Danger)
   );
 }
 
@@ -114,92 +109,61 @@ function nomeTicket(userId) {
   return `ticket-${userId}`;
 }
 
-function escaparTexto(texto) {
-  return String(texto || "")
-    .replace(/\r/g, "")
-    .replace(/\t/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-async function procurarTicketAberto(guild, userId) {
-  const channels = await guild.channels.fetch();
-
-  return channels.find(
-    (channel) =>
-      channel &&
-      channel.type === ChannelType.GuildText &&
-      channel.name === nomeTicket(userId)
-  );
-}
-
-async function obterCanalPainel(guild) {
-  const channel = await guild.channels.fetch(CANAL_PAINEL_ID).catch(() => null);
-
-  if (!channel || !channel.isTextBased()) {
-    throw new Error("CANAL_PAINEL_ID inválido ou canal não é de texto.");
-  }
-
-  return channel;
-}
-
-async function criarOuAtualizarPainelFixo(guild) {
-  const canalPainel = await obterCanalPainel(guild);
-  const embed = criarEmbedPainel();
-  const components = [criarBotoesPainel()];
-
-  if (MENSAGEM_PAINEL_ID) {
-    const mensagemExistente = await canalPainel.messages
-      .fetch(MENSAGEM_PAINEL_ID)
-      .catch(() => null);
-
-    if (mensagemExistente) {
-      await mensagemExistente.edit({
-        embeds: [embed],
-        components,
-      });
-
-      return { type: "updated", message: mensagemExistente };
-    }
-  }
-
-  const mensagens = await canalPainel.messages.fetch({ limit: 50 }).catch(() => null);
-
-  if (mensagens) {
-    const painelAntigo = mensagens.find(
-      (msg) =>
-        msg.author.id === client.user.id &&
-        msg.embeds.length > 0 &&
-        msg.embeds[0].title === PAINEL_TITULO
-    );
-
-    if (painelAntigo) {
-      await painelAntigo.edit({
-        embeds: [embed],
-        components,
-      });
-
-      MENSAGEM_PAINEL_ID = painelAntigo.id;
-      console.log(`Painel fixo atualizado. ID: ${MENSAGEM_PAINEL_ID}`);
-      return { type: "updated", message: painelAntigo };
-    }
-  }
-
-  const novaMensagem = await canalPainel.send({
-    embeds: [embed],
-    components,
-  });
-
-  MENSAGEM_PAINEL_ID = novaMensagem.id;
-  console.log(`Painel fixo criado. ID: ${MENSAGEM_PAINEL_ID}`);
-  return { type: "created", message: novaMensagem };
-}
-
 function staffTemPermissao(member) {
   if (!member) return false;
   if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
   if (!CARGO_ATENDIMENTO_ID) return false;
   return member.roles.cache.has(CARGO_ATENDIMENTO_ID);
+}
+
+async function procurarTicketAberto(guild, userId) {
+  const channels = await guild.channels.fetch();
+  return channels.find(
+    (ch) =>
+      ch &&
+      ch.type === ChannelType.GuildText &&
+      ch.name === nomeTicket(userId)
+  );
+}
+
+async function obterCanalPainel(guild) {
+  const canal = await guild.channels.fetch(CANAL_PAINEL_ID).catch(() => null);
+  if (!canal || !canal.isTextBased()) {
+    throw new Error("CANAL_PAINEL_ID inválido.");
+  }
+  return canal;
+}
+
+async function criarOuAtualizarPainelFixo(guild) {
+  const canal = await obterCanalPainel(guild);
+  const embed = criarEmbedPainel();
+  const components = [criarBotoesPainel()];
+
+  if (MENSAGEM_PAINEL_ID) {
+    const msg = await canal.messages.fetch(MENSAGEM_PAINEL_ID).catch(() => null);
+    if (msg) {
+      await msg.edit({ embeds: [embed], components });
+      return { type: "updated", message: msg };
+    }
+  }
+
+  const ultimas = await canal.messages.fetch({ limit: 30 }).catch(() => null);
+  if (ultimas) {
+    const painel = ultimas.find(
+      (m) =>
+        m.author.id === client.user.id &&
+        m.embeds.length > 0 &&
+        m.embeds[0].title === PAINEL_TITULO
+    );
+
+    if (painel) {
+      await painel.edit({ embeds: [embed], components });
+      return { type: "updated", message: painel };
+    }
+  }
+
+  const nova = await canal.send({ embeds: [embed], components });
+  return { type: "created", message: nova };
 }
 
 async function criarTicket(interaction) {
@@ -224,7 +188,7 @@ async function criarTicket(interaction) {
       });
     }
 
-    const permissionOverwrites = [
+    const overwrites = [
       {
         id: guild.roles.everyone.id,
         deny: [PermissionsBitField.Flags.ViewChannel],
@@ -240,7 +204,7 @@ async function criarTicket(interaction) {
     ];
 
     if (CARGO_ATENDIMENTO_ID) {
-      permissionOverwrites.push({
+      overwrites.push({
         id: CARGO_ATENDIMENTO_ID,
         allow: [
           PermissionsBitField.Flags.ViewChannel,
@@ -251,12 +215,12 @@ async function criarTicket(interaction) {
       });
     }
 
-    const channel = await guild.channels.create({
+    const canal = await guild.channels.create({
       name: nomeTicket(user.id),
       type: ChannelType.GuildText,
       parent: CATEGORIA_TICKETS_ID || null,
-      topic: `ticketUser:${user.id} | assumidoPor:ninguem`,
-      permissionOverwrites,
+      topic: `ticketUser:${user.id};assumidoPor:nenhum`,
+      permissionOverwrites: overwrites,
     });
 
     const embed = new EmbedBuilder()
@@ -266,28 +230,24 @@ async function criarTicket(interaction) {
           `Olá ${user}, seu ticket foi criado com sucesso.`,
           "",
           "Explique aqui o que você precisa.",
-          "",
-          CARGO_ATENDIMENTO_ID
-            ? `Equipe avisada: <@&${CARGO_ATENDIMENTO_ID}>`
-            : "Equipe avisada.",
+          CARGO_ATENDIMENTO_ID ? `<@&${CARGO_ATENDIMENTO_ID}> foi avisado.` : "Equipe avisada.",
         ].join("\n")
       )
-      .setColor(0x0b5ed7)
+      .setColor(0xff2b2b)
       .setTimestamp();
 
-    await channel.send({
+    await canal.send({
       content: `${user}`,
       embeds: [embed],
       components: [criarBotoesTicket()],
     });
 
     return interaction.reply({
-      content: `✅ Ticket criado com sucesso: ${channel}`,
+      content: `✅ Ticket criado com sucesso: ${canal}`,
       ephemeral: true,
     });
   } catch (error) {
     console.error("Erro ao criar ticket:", error);
-
     if (!interaction.replied && !interaction.deferred) {
       return interaction.reply({
         content: "❌ Erro ao criar o ticket.",
@@ -300,36 +260,35 @@ async function criarTicket(interaction) {
 }
 
 async function assumirTicket(interaction) {
-  const channel = interaction.channel;
+  const canal = interaction.channel;
   const member = interaction.member;
 
-  if (!channel || !channel.name.startsWith("ticket-")) {
+  if (!canal || !canal.name.startsWith("ticket-")) {
     return interaction.reply({
-      content: "❌ Isso só pode ser usado dentro de ticket.",
+      content: "❌ Isso só funciona em ticket.",
       ephemeral: true,
     });
   }
 
   if (!staffTemPermissao(member)) {
     return interaction.reply({
-      content: "❌ Você não tem permissão para assumir tickets.",
+      content: "❌ Você não tem permissão para assumir ticket.",
       ephemeral: true,
     });
   }
 
-  const topicoAtual = channel.topic || "";
-  if (topicoAtual.includes(`assumidoPor:${interaction.user.id}`)) {
+  const topico = canal.topic || "";
+  if (topico.includes(`assumidoPor:${interaction.user.id}`)) {
     return interaction.reply({
       content: "ℹ️ Você já assumiu este ticket.",
       ephemeral: true,
     });
   }
 
-  const novoTopico = topicoAtual.replace(/assumidoPor:[^|]+/i, `assumidoPor:${interaction.user.id}`);
+  const novoTopico = topico.replace(/assumidoPor:[^;]+/i, `assumidoPor:${interaction.user.id}`);
+  await canal.setTopic(novoTopico).catch(() => null);
 
-  await channel.setTopic(novoTopico).catch(() => null);
-
-  await channel.send({
+  await canal.send({
     embeds: [
       new EmbedBuilder()
         .setTitle("👮 Ticket Assumido")
@@ -339,122 +298,97 @@ async function assumirTicket(interaction) {
     ],
   });
 
-  if (interaction.isButton()) {
-    return interaction.reply({
-      content: "✅ Ticket assumido com sucesso.",
-      ephemeral: true,
-    });
-  }
-
   return interaction.reply({
     content: "✅ Ticket assumido com sucesso.",
     ephemeral: true,
   });
 }
 
-async function buscarMensagensDoCanal(channel) {
-  let ultimaId = null;
+async function buscarMensagens(channel) {
+  let before;
   const todas = [];
 
   while (true) {
-    const options = { limit: 100 };
-    if (ultimaId) options.before = ultimaId;
+    const lote = await channel.messages.fetch({ limit: 100, before }).catch(() => null);
+    if (!lote || lote.size === 0) break;
 
-    const batch = await channel.messages.fetch(options).catch(() => null);
-    if (!batch || batch.size === 0) break;
+    todas.push(...lote.values());
+    before = lote.last().id;
 
-    todas.push(...batch.values());
-    ultimaId = batch.last().id;
-
-    if (batch.size < 100) break;
+    if (lote.size < 100) break;
     if (todas.length >= 1000) break;
   }
 
   return todas.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 }
 
-async function gerarTranscriptPDF(channel, closedByTag) {
-  const mensagens = await buscarMensagensDoCanal(channel);
+async function gerarPDF(channel, fechadoPor) {
+  const mensagens = await buscarMensagens(channel);
 
   return new Promise((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({
-        margin: 40,
-        size: "A4",
-      });
+    const doc = new PDFDocument({ margin: 35, size: "A4" });
+    const chunks = [];
 
-      const chunks = [];
-      doc.on("data", (chunk) => chunks.push(chunk));
-      doc.on("end", () => resolve(Buffer.concat(chunks)));
-      doc.on("error", reject);
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
 
-      doc.fontSize(18).text("Transcript do Ticket", { align: "center" });
-      doc.moveDown(0.5);
-      doc.fontSize(10).text(`Canal: #${channel.name}`);
-      doc.text(`Fechado por: ${closedByTag}`);
-      doc.text(`Data: ${new Date().toLocaleString("pt-BR")}`);
-      doc.moveDown();
+    doc.fontSize(18).text("Transcript do Ticket", { align: "center" });
+    doc.moveDown(0.5);
+    doc.fontSize(10).text(`Canal: #${channel.name}`);
+    doc.text(`Fechado por: ${fechadoPor.tag}`);
+    doc.text(`Data: ${new Date().toLocaleString("pt-BR")}`);
+    doc.moveDown();
 
-      doc.fontSize(12).text("Mensagens:", { underline: true });
-      doc.moveDown(0.5);
+    if (mensagens.length === 0) {
+      doc.fontSize(10).text("Nenhuma mensagem encontrada.");
+    } else {
+      for (const msg of mensagens) {
+        const data = new Date(msg.createdTimestamp).toLocaleString("pt-BR");
+        const autor = msg.author ? msg.author.tag : "Desconhecido";
+        const texto = (msg.content || "[sem texto]").replace(/\s+/g, " ").trim();
+        const anexos =
+          msg.attachments.size > 0
+            ? ` | anexos: ${[...msg.attachments.values()].map((a) => a.url).join(", ")}`
+            : "";
 
-      if (mensagens.length === 0) {
-        doc.fontSize(10).text("Nenhuma mensagem encontrada.");
-      } else {
-        for (const msg of mensagens) {
-          const autor = `${msg.author?.tag || "Usuário desconhecido"}`;
-          const data = new Date(msg.createdTimestamp).toLocaleString("pt-BR");
-          const conteudo = escaparTexto(msg.content) || "[sem texto]";
-          const anexos =
-            msg.attachments?.size > 0
-              ? ` | anexos: ${[...msg.attachments.values()].map((a) => a.url).join(", ")}`
-              : "";
-
-          const linha = `[${data}] ${autor}: ${conteudo}${anexos}`;
-
-          doc.fontSize(9).text(linha, {
-            width: 515,
+        doc
+          .fontSize(9)
+          .text(`[${data}] ${autor}: ${texto}${anexos}`, {
+            width: 520,
             align: "left",
           });
-
-          doc.moveDown(0.25);
-        }
+        doc.moveDown(0.25);
       }
-
-      doc.end();
-    } catch (error) {
-      reject(error);
     }
+
+    doc.end();
   });
 }
 
-async function enviarTranscriptEFechar(channel, closedByUser) {
-  const guild = channel.guild;
-  const transcriptChannel = CANAL_TRANSCRIPT_ID
-    ? await guild.channels.fetch(CANAL_TRANSCRIPT_ID).catch(() => null)
-    : null;
-
-  const pdfBuffer = await gerarTranscriptPDF(channel, closedByUser.tag);
-  const attachment = new AttachmentBuilder(pdfBuffer, {
+async function fecharTicketComTranscript(channel, user) {
+  const pdf = await gerarPDF(channel, user);
+  const arquivo = new AttachmentBuilder(pdf, {
     name: `transcript-${channel.name}.pdf`,
   });
 
-  const infoEmbed = new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle("📄 Transcript do Ticket")
-    .setDescription(
-      [
-        `Canal: **#${channel.name}**`,
-        `Fechado por: ${closedByUser}`,
-      ].join("\n")
-    )
-    .setColor(0x0b5ed7)
+    .setDescription(`Canal: **#${channel.name}**\nFechado por: ${user}`)
+    .setColor(0xff2b2b)
     .setTimestamp();
 
-  if (transcriptChannel && transcriptChannel.isTextBased()) {
-    await transcriptChannel.send({
-      embeds: [infoEmbed],
-      files: [attachment],
-    }).catch(console.error);
+  if (CANAL_TRANSCRIPT_ID) {
+    const canalTranscript = await channel.guild.channels
+      .fetch(CANAL_TRANSCRIPT_ID)
+      .catch(() => null);
+
+    if (canalTranscript && canalTranscript.isTextBased()) {
+      await canalTranscript.send({
+        embeds: [embed],
+        files: [arquivo],
+      }).catch(console.error);
+    }
   }
 
   await channel.send("🔒 Fechando ticket em 3 segundos...");
@@ -464,7 +398,7 @@ async function enviarTranscriptEFechar(channel, closedByUser) {
 }
 
 client.once("ready", async () => {
-  console.log(`Bot online como ${client.user.tag}`);
+  console.log(`✅ Bot online como ${client.user.tag}`);
 
   try {
     await registrarComandos();
@@ -480,9 +414,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === "painel") {
         await interaction.deferReply({ ephemeral: true });
-
         const resultado = await criarOuAtualizarPainelFixo(interaction.guild);
-
         await interaction.editReply({
           content:
             resultado.type === "created"
@@ -499,17 +431,16 @@ client.on("interactionCreate", async (interaction) => {
 
       if (interaction.commandName === "fechar") {
         const nome = interaction.channel?.name || "";
-
         if (!nome.startsWith("ticket-")) {
           return interaction.reply({
-            content: "❌ Esse comando só pode ser usado dentro de ticket.",
+            content: "❌ Esse comando só pode ser usado em ticket.",
             ephemeral: true,
           });
         }
 
         await interaction.deferReply({ ephemeral: true });
         await interaction.editReply("📄 Gerando transcript e fechando ticket...");
-        await enviarTranscriptEFechar(interaction.channel, interaction.user);
+        await fecharTicketComTranscript(interaction.channel, interaction.user);
         return;
       }
     }
@@ -527,10 +458,9 @@ client.on("interactionCreate", async (interaction) => {
 
       if (interaction.customId === "fechar_ticket") {
         const nome = interaction.channel?.name || "";
-
         if (!nome.startsWith("ticket-")) {
           return interaction.reply({
-            content: "❌ Esse botão só funciona em tickets.",
+            content: "❌ Esse botão só funciona em ticket.",
             ephemeral: true,
           });
         }
@@ -540,7 +470,7 @@ client.on("interactionCreate", async (interaction) => {
           ephemeral: true,
         });
 
-        await enviarTranscriptEFechar(interaction.channel, interaction.user);
+        await fecharTicketComTranscript(interaction.channel, interaction.user);
         return;
       }
     }
