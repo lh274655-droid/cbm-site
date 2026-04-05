@@ -7,6 +7,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   EmbedBuilder,
   SlashCommandBuilder,
   REST,
@@ -30,7 +31,7 @@ const PAINEL_IMAGEM_URL = process.env.PAINEL_IMAGEM_URL || "";
 const PAINEL_TITULO = process.env.PAINEL_TITULO || "🎫 Central de Atendimento";
 const PAINEL_TEXTO =
   process.env.PAINEL_TEXTO ||
-  "Clique no botão abaixo para abrir seu ticket.\n\n• Um ticket por usuário\n• Atendimento privado\n• Aguarde a equipe assumir";
+  "Clique no botão abaixo para iniciar seu atendimento.\n\n• Um ticket por usuário\n• Atendimento privado\n• Selecione o tipo e preencha o formulário";
 const MENSAGEM_PAINEL_ID = process.env.MENSAGEM_PAINEL_ID || "";
 
 if (!TOKEN || !CLIENT_ID || !GUILD_ID || !CANAL_PAINEL_ID) {
@@ -59,7 +60,7 @@ const commands = [
     .setDescription("Assume o ticket atual"),
   new SlashCommandBuilder()
     .setName("fechar")
-    .setDescription("Fecha o ticket atual com motivo e transcript PDF"),
+    .setDescription("Fecha o ticket atual com motivo"),
 ].map((c) => c.toJSON());
 
 async function registrarComandos() {
@@ -70,6 +71,35 @@ async function registrarComandos() {
   });
 
   console.log("✅ Comandos registrados.");
+}
+
+function limparTexto(texto) {
+  return String(texto || "")
+    .replace(/\r/g, "")
+    .replace(/\t/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function nomeTicket(userId) {
+  return `ticket-${userId}`;
+}
+
+function extrairCampo(topic, nome) {
+  const regex = new RegExp(`${nome}:([^;]+)`, "i");
+  const match = String(topic || "").match(regex);
+  return match ? match[1] : null;
+}
+
+function staffTemPermissao(member) {
+  if (!member) return false;
+
+  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+    return true;
+  }
+
+  if (!CARGO_ATENDIMENTO_ID) return false;
+  return member.roles.cache.has(CARGO_ATENDIMENTO_ID);
 }
 
 function criarEmbedPainel() {
@@ -87,13 +117,41 @@ function criarEmbedPainel() {
   return embed;
 }
 
-function criarBotoesPainel() {
+function criarBotaoPainel() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("abrir_ticket")
-      .setLabel("Abrir Ticket")
+      .setCustomId("iniciar_ticket")
+      .setLabel("Abrir Atendimento")
       .setEmoji("🎫")
       .setStyle(ButtonStyle.Danger)
+  );
+}
+
+function criarMenuTipo() {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("selecionar_tipo_ticket")
+      .setPlaceholder("Selecione o tipo do atendimento")
+      .addOptions([
+        {
+          label: "Denúncia",
+          value: "denuncia",
+          emoji: "🚨",
+          description: "Abrir ticket de denúncia",
+        },
+        {
+          label: "Suporte",
+          value: "suporte",
+          emoji: "🛠️",
+          description: "Abrir ticket de suporte",
+        },
+        {
+          label: "Recrutamento",
+          value: "recrutamento",
+          emoji: "📋",
+          description: "Abrir ticket de recrutamento",
+        },
+      ])
   );
 }
 
@@ -122,35 +180,81 @@ function criarBotaoReabrir(ticketUserId) {
   );
 }
 
-function nomeTicket(userId) {
-  return `ticket-${userId}`;
+function criarModalAbertura(tipo) {
+  const tituloMap = {
+    denuncia: "Abrir Ticket - Denúncia",
+    suporte: "Abrir Ticket - Suporte",
+    recrutamento: "Abrir Ticket - Recrutamento",
+  };
+
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_abrir_ticket:${tipo}`)
+    .setTitle(tituloMap[tipo] || "Abrir Ticket");
+
+  const nomeInput = new TextInputBuilder()
+    .setCustomId("nome")
+    .setLabel("Seu nome")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(60)
+    .setPlaceholder("Ex: Luiz Henrique");
+
+  const idInput = new TextInputBuilder()
+    .setCustomId("id_jogo")
+    .setLabel("Seu ID")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(30)
+    .setPlaceholder("Ex: 101");
+
+  const descricaoInput = new TextInputBuilder()
+    .setCustomId("descricao")
+    .setLabel("Descrição")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMaxLength(1000)
+    .setPlaceholder("Explique detalhadamente o atendimento");
+
+  const extraLabel =
+    tipo === "recrutamento"
+      ? "Experiência / Observação"
+      : tipo === "denuncia"
+      ? "Envolvidos / Provas"
+      : "Informação adicional";
+
+  const extraInput = new TextInputBuilder()
+    .setCustomId("extra")
+    .setLabel(extraLabel)
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(1000)
+    .setPlaceholder("Opcional");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nomeInput),
+    new ActionRowBuilder().addComponents(idInput),
+    new ActionRowBuilder().addComponents(descricaoInput),
+    new ActionRowBuilder().addComponents(extraInput)
+  );
+
+  return modal;
 }
 
-function limparTexto(texto) {
-  return String(texto || "")
-    .replace(/\r/g, "")
-    .replace(/\t/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
+function criarModalFechamento() {
+  const modal = new ModalBuilder()
+    .setCustomId("modal_fechar_ticket")
+    .setTitle("Fechar Ticket");
 
-function staffTemPermissao(member) {
-  if (!member) return false;
+  const motivoInput = new TextInputBuilder()
+    .setCustomId("motivo")
+    .setLabel("Qual o motivo do fechamento?")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMaxLength(1000)
+    .setPlaceholder("Ex: problema resolvido, atendimento finalizado...");
 
-  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-    return true;
-  }
-
-  if (!CARGO_ATENDIMENTO_ID) {
-    return false;
-  }
-
-  return member.roles.cache.has(CARGO_ATENDIMENTO_ID);
-}
-
-function extrairTicketUserId(topic) {
-  const match = String(topic || "").match(/ticketUser:([^;|]+)/i);
-  return match ? match[1] : null;
+  modal.addComponents(new ActionRowBuilder().addComponents(motivoInput));
+  return modal;
 }
 
 async function procurarTicketAberto(guild, userId) {
@@ -177,7 +281,7 @@ async function obterCanalPainel(guild) {
 async function criarOuAtualizarPainelFixo(guild) {
   const canal = await obterCanalPainel(guild);
   const embed = criarEmbedPainel();
-  const components = [criarBotoesPainel()];
+  const components = [criarBotaoPainel()];
 
   if (MENSAGEM_PAINEL_ID) {
     const msg = await canal.messages.fetch(MENSAGEM_PAINEL_ID).catch(() => null);
@@ -208,7 +312,7 @@ async function criarOuAtualizarPainelFixo(guild) {
   return { type: "created", message: nova };
 }
 
-async function criarTicket(interaction, userId = null) {
+async function criarTicketComFormulario(interaction, dados, userId = null) {
   const guild = interaction.guild;
   const targetUserId = userId || interaction.user.id;
   const userObj = userId
@@ -217,7 +321,7 @@ async function criarTicket(interaction, userId = null) {
 
   if (!userObj) {
     return interaction.reply({
-      content: "❌ Não consegui encontrar o usuário para criar o ticket.",
+      content: "❌ Não consegui localizar o usuário.",
       ephemeral: true,
     });
   }
@@ -268,38 +372,55 @@ async function criarTicket(interaction, userId = null) {
       });
     }
 
+    const topicParts = [
+      `ticketUser:${targetUserId}`,
+      `tipo:${dados.tipo}`,
+      `nome:${encodeURIComponent(dados.nome)}`,
+      `idjogo:${encodeURIComponent(dados.idJogo)}`,
+      `descricao:${encodeURIComponent(dados.descricao.slice(0, 150))}`,
+      `assumidoPor:nenhum`,
+    ];
+
     const canal = await guild.channels.create({
       name: nomeTicket(targetUserId),
       type: ChannelType.GuildText,
       parent: CATEGORIA_TICKETS_ID || null,
-      topic: `ticketUser:${targetUserId};assumidoPor:nenhum`,
+      topic: topicParts.join(";"),
       permissionOverwrites: overwrites,
     });
 
+    const tipoBonito = {
+      denuncia: "Denúncia",
+      suporte: "Suporte",
+      recrutamento: "Recrutamento",
+    }[dados.tipo] || dados.tipo;
+
     const embed = new EmbedBuilder()
       .setTitle(userId ? "🔓 Ticket Reaberto" : "🎫 Ticket Aberto")
-      .setDescription(
-        [
-          `Olá ${userObj}, seu ticket foi ${userId ? "reaberto" : "criado"} com sucesso.`,
-          "",
-          "Explique aqui o que você precisa.",
-          "",
-          CARGO_ATENDIMENTO_ID
-            ? `<@&${CARGO_ATENDIMENTO_ID}> foi avisado.`
-            : "Equipe avisada.",
-        ].join("\n")
-      )
       .setColor(0xff2b2b)
+      .addFields(
+        { name: "Tipo", value: tipoBonito, inline: true },
+        { name: "Nome", value: limparTexto(dados.nome), inline: true },
+        { name: "ID", value: limparTexto(dados.idJogo), inline: true },
+        { name: "Descrição", value: limparTexto(dados.descricao).slice(0, 1024) }
+      )
       .setTimestamp();
 
+    if (dados.extra && limparTexto(dados.extra)) {
+      embed.addFields({
+        name: "Informação adicional",
+        value: limparTexto(dados.extra).slice(0, 1024),
+      });
+    }
+
     await canal.send({
-      content: `${userObj}`,
+      content: `${userObj}${CARGO_ATENDIMENTO_ID ? ` <@&${CARGO_ATENDIMENTO_ID}>` : ""}`,
       embeds: [embed],
       components: [criarBotoesTicket()],
     });
 
     return interaction.reply({
-      content: `✅ Ticket ${userId ? "reaberto" : "criado"} com sucesso: ${canal}`,
+      content: `✅ Ticket criado com sucesso: ${canal}`,
       ephemeral: true,
     });
   } catch (error) {
@@ -371,24 +492,15 @@ async function buscarMensagens(channel) {
   const todas = [];
 
   while (true) {
-    const lote = await channel.messages
-      .fetch({ limit: 100, before })
-      .catch(() => null);
+    const lote = await channel.messages.fetch({ limit: 100, before }).catch(() => null);
 
-    if (!lote || lote.size === 0) {
-      break;
-    }
+    if (!lote || lote.size === 0) break;
 
     todas.push(...lote.values());
     before = lote.last().id;
 
-    if (lote.size < 100) {
-      break;
-    }
-
-    if (todas.length >= 1000) {
-      break;
-    }
+    if (lote.size < 100) break;
+    if (todas.length >= 1000) break;
   }
 
   return todas.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
@@ -396,6 +508,11 @@ async function buscarMensagens(channel) {
 
 async function gerarPDF(channel, fechadoPor, motivo) {
   const mensagens = await buscarMensagens(channel);
+
+  const tipo = extrairCampo(channel.topic, "tipo") || "não informado";
+  const nome = decodeURIComponent(extrairCampo(channel.topic, "nome") || "não informado");
+  const idJogo = decodeURIComponent(extrairCampo(channel.topic, "idjogo") || "não informado");
+  const descricao = decodeURIComponent(extrairCampo(channel.topic, "descricao") || "não informado");
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 35, size: "A4" });
@@ -411,7 +528,12 @@ async function gerarPDF(channel, fechadoPor, motivo) {
     doc.text(`Fechado por: ${fechadoPor.tag}`);
     doc.text(`Data: ${new Date().toLocaleString("pt-BR")}`);
     doc.moveDown(0.5);
-    doc.fontSize(11).text(`Motivo do fechamento: ${limparTexto(motivo) || "Não informado"}`);
+
+    doc.fontSize(11).text(`Tipo: ${tipo}`);
+    doc.text(`Nome: ${nome}`);
+    doc.text(`ID: ${idJogo}`);
+    doc.text(`Descrição inicial: ${descricao}`);
+    doc.text(`Motivo do fechamento: ${limparTexto(motivo) || "Não informado"}`);
     doc.moveDown();
 
     if (mensagens.length === 0) {
@@ -439,12 +561,16 @@ async function gerarPDF(channel, fechadoPor, motivo) {
 }
 
 async function fecharTicketComTranscriptComMotivo(channel, user, motivo) {
-  const ticketUserId = extrairTicketUserId(channel.topic);
+  const ticketUserId = extrairCampo(channel.topic, "ticketUser");
 
   const pdf = await gerarPDF(channel, user, motivo);
   const arquivo = new AttachmentBuilder(pdf, {
     name: `transcript-${channel.name}.pdf`,
   });
+
+  const tipo = extrairCampo(channel.topic, "tipo") || "não informado";
+  const nome = decodeURIComponent(extrairCampo(channel.topic, "nome") || "não informado");
+  const idJogo = decodeURIComponent(extrairCampo(channel.topic, "idjogo") || "não informado");
 
   const embed = new EmbedBuilder()
     .setTitle("📄 Ticket Finalizado")
@@ -453,7 +579,11 @@ async function fecharTicketComTranscriptComMotivo(channel, user, motivo) {
         `Canal: **#${channel.name}**`,
         `Fechado por: ${user}`,
         "",
-        `**Motivo:**`,
+        `**Tipo:** ${tipo}`,
+        `**Nome:** ${nome}`,
+        `**ID:** ${idJogo}`,
+        "",
+        `**Motivo do fechamento:**`,
         motivo,
       ].join("\n")
     )
@@ -521,38 +651,27 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       if (interaction.commandName === "fechar") {
-        const nome = interaction.channel?.name || "";
+        const nomeCanal = interaction.channel?.name || "";
 
-        if (!nome.startsWith("ticket-")) {
+        if (!nomeCanal.startsWith("ticket-")) {
           return interaction.reply({
             content: "❌ Esse comando só pode ser usado em ticket.",
             ephemeral: true,
           });
         }
 
-        const modal = new ModalBuilder()
-          .setCustomId("modal_fechar_ticket")
-          .setTitle("Fechar Ticket");
-
-        const motivoInput = new TextInputBuilder()
-          .setCustomId("motivo")
-          .setLabel("Qual o motivo do fechamento?")
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setPlaceholder("Ex: problema resolvido, atendimento finalizado...");
-
-        const row = new ActionRowBuilder().addComponents(motivoInput);
-        modal.addComponents(row);
-
-        await interaction.showModal(modal);
+        await interaction.showModal(criarModalFechamento());
         return;
       }
     }
 
     if (interaction.isButton()) {
-      if (interaction.customId === "abrir_ticket") {
-        await criarTicket(interaction);
-        return;
+      if (interaction.customId === "iniciar_ticket") {
+        return interaction.reply({
+          content: "Selecione abaixo o tipo do atendimento.",
+          components: [criarMenuTipo()],
+          ephemeral: true,
+        });
       }
 
       if (interaction.customId === "assumir_ticket") {
@@ -561,30 +680,16 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       if (interaction.customId === "fechar_ticket_modal") {
-        const nome = interaction.channel?.name || "";
+        const nomeCanal = interaction.channel?.name || "";
 
-        if (!nome.startsWith("ticket-")) {
+        if (!nomeCanal.startsWith("ticket-")) {
           return interaction.reply({
             content: "❌ Esse botão só funciona em ticket.",
             ephemeral: true,
           });
         }
 
-        const modal = new ModalBuilder()
-          .setCustomId("modal_fechar_ticket")
-          .setTitle("Fechar Ticket");
-
-        const motivoInput = new TextInputBuilder()
-          .setCustomId("motivo")
-          .setLabel("Qual o motivo do fechamento?")
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setPlaceholder("Ex: problema resolvido, atendimento finalizado...");
-
-        const row = new ActionRowBuilder().addComponents(motivoInput);
-        modal.addComponents(row);
-
-        await interaction.showModal(modal);
+        await interaction.showModal(criarModalFechamento());
         return;
       }
 
@@ -598,10 +703,7 @@ client.on("interactionCreate", async (interaction) => {
 
         const [, ticketUserId] = interaction.customId.split(":");
 
-        const ticketExistente = await procurarTicketAberto(
-          interaction.guild,
-          ticketUserId
-        );
+        const ticketExistente = await procurarTicketAberto(interaction.guild, ticketUserId);
 
         if (ticketExistente) {
           return interaction.reply({
@@ -610,16 +712,52 @@ client.on("interactionCreate", async (interaction) => {
           });
         }
 
-        await criarTicket(interaction, ticketUserId);
+        const dadosReabertura = {
+          tipo: "reabertura",
+          nome: "Reaberto pela equipe",
+          idJogo: "N/A",
+          descricao: "Ticket reaberto manualmente pela equipe.",
+          extra: "",
+        };
+
+        await criarTicketComFormulario(interaction, dadosReabertura, ticketUserId);
+        return;
+      }
+    }
+
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === "selecionar_tipo_ticket") {
+        const tipo = interaction.values[0];
+        await interaction.showModal(criarModalAbertura(tipo));
         return;
       }
     }
 
     if (interaction.isModalSubmit()) {
-      if (interaction.customId === "modal_fechar_ticket") {
-        const nome = interaction.channel?.name || "";
+      if (interaction.customId.startsWith("modal_abrir_ticket:")) {
+        const [, tipo] = interaction.customId.split(":");
 
-        if (!nome.startsWith("ticket-")) {
+        const nome = interaction.fields.getTextInputValue("nome");
+        const idJogo = interaction.fields.getTextInputValue("id_jogo");
+        const descricao = interaction.fields.getTextInputValue("descricao");
+        const extra = interaction.fields.getTextInputValue("extra") || "";
+
+        const dados = {
+          tipo,
+          nome,
+          idJogo,
+          descricao,
+          extra,
+        };
+
+        await criarTicketComFormulario(interaction, dados);
+        return;
+      }
+
+      if (interaction.customId === "modal_fechar_ticket") {
+        const nomeCanal = interaction.channel?.name || "";
+
+        if (!nomeCanal.startsWith("ticket-")) {
           return interaction.reply({
             content: "❌ Isso só funciona em ticket.",
             ephemeral: true,
@@ -645,12 +783,10 @@ client.on("interactionCreate", async (interaction) => {
     console.error("Erro em interactionCreate:", error);
 
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-      await interaction
-        .reply({
-          content: "❌ Ocorreu um erro ao executar essa ação.",
-          ephemeral: true,
-        })
-        .catch(() => null);
+      await interaction.reply({
+        content: "❌ Ocorreu um erro ao executar essa ação.",
+        ephemeral: true,
+      }).catch(() => null);
     }
   }
 });
