@@ -1,7 +1,7 @@
 {
   "name": "cbm-bot",
   "version": "1.0.0",
-  "description": "Bot Discord com painel fixo, assumir ticket e transcript PDF",
+  "description": "Bot Discord com painel fixo, tickets, assumir, fechar com motivo, transcript PDF e reabrir",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
