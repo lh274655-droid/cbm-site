@@ -12,6 +12,9 @@ const {
   REST,
   Routes,
   AttachmentBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require("discord.js");
 const PDFDocument = require("pdfkit");
 
@@ -56,14 +59,16 @@ const commands = [
     .setDescription("Assume o ticket atual"),
   new SlashCommandBuilder()
     .setName("fechar")
-    .setDescription("Fecha o ticket atual com transcript em PDF"),
+    .setDescription("Fecha o ticket atual com motivo e transcript PDF"),
 ].map((c) => c.toJSON());
 
 async function registrarComandos() {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
+
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
     body: commands,
   });
+
   console.log("✅ Comandos registrados.");
 }
 
@@ -75,7 +80,9 @@ function criarEmbedPainel() {
     .setFooter({ text: "CBM BOT • Painel Fixo" })
     .setTimestamp();
 
-  if (PAINEL_IMAGEM_URL) embed.setImage(PAINEL_IMAGEM_URL);
+  if (PAINEL_IMAGEM_URL) {
+    embed.setImage(PAINEL_IMAGEM_URL);
+  }
 
   return embed;
 }
@@ -98,10 +105,20 @@ function criarBotoesTicket() {
       .setEmoji("👮")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId("fechar_ticket")
+      .setCustomId("fechar_ticket_modal")
       .setLabel("Fechar Ticket")
       .setEmoji("🔒")
       .setStyle(ButtonStyle.Danger)
+  );
+}
+
+function criarBotaoReabrir(ticketUserId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`reabrir_ticket:${ticketUserId}`)
+      .setLabel("Reabrir Ticket")
+      .setEmoji("🔓")
+      .setStyle(ButtonStyle.Success)
   );
 }
 
@@ -109,15 +126,36 @@ function nomeTicket(userId) {
   return `ticket-${userId}`;
 }
 
+function limparTexto(texto) {
+  return String(texto || "")
+    .replace(/\r/g, "")
+    .replace(/\t/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function staffTemPermissao(member) {
   if (!member) return false;
-  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
-  if (!CARGO_ATENDIMENTO_ID) return false;
+
+  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+    return true;
+  }
+
+  if (!CARGO_ATENDIMENTO_ID) {
+    return false;
+  }
+
   return member.roles.cache.has(CARGO_ATENDIMENTO_ID);
+}
+
+function extrairTicketUserId(topic) {
+  const match = String(topic || "").match(/ticketUser:([^;|]+)/i);
+  return match ? match[1] : null;
 }
 
 async function procurarTicketAberto(guild, userId) {
   const channels = await guild.channels.fetch();
+
   return channels.find(
     (ch) =>
       ch &&
@@ -128,9 +166,11 @@ async function procurarTicketAberto(guild, userId) {
 
 async function obterCanalPainel(guild) {
   const canal = await guild.channels.fetch(CANAL_PAINEL_ID).catch(() => null);
+
   if (!canal || !canal.isTextBased()) {
     throw new Error("CANAL_PAINEL_ID inválido.");
   }
+
   return canal;
 }
 
@@ -141,6 +181,7 @@ async function criarOuAtualizarPainelFixo(guild) {
 
   if (MENSAGEM_PAINEL_ID) {
     const msg = await canal.messages.fetch(MENSAGEM_PAINEL_ID).catch(() => null);
+
     if (msg) {
       await msg.edit({ embeds: [embed], components });
       return { type: "updated", message: msg };
@@ -148,6 +189,7 @@ async function criarOuAtualizarPainelFixo(guild) {
   }
 
   const ultimas = await canal.messages.fetch({ limit: 30 }).catch(() => null);
+
   if (ultimas) {
     const painel = ultimas.find(
       (m) =>
@@ -166,24 +208,35 @@ async function criarOuAtualizarPainelFixo(guild) {
   return { type: "created", message: nova };
 }
 
-async function criarTicket(interaction) {
-  const { guild, user } = interaction;
+async function criarTicket(interaction, userId = null) {
+  const guild = interaction.guild;
+  const targetUserId = userId || interaction.user.id;
+  const userObj = userId
+    ? await client.users.fetch(userId).catch(() => null)
+    : interaction.user;
 
-  if (ticketsEmCriacao.has(user.id)) {
+  if (!userObj) {
     return interaction.reply({
-      content: "⏳ Seu ticket já está sendo criado, aguarde...",
+      content: "❌ Não consegui encontrar o usuário para criar o ticket.",
       ephemeral: true,
     });
   }
 
-  ticketsEmCriacao.add(user.id);
+  if (ticketsEmCriacao.has(targetUserId)) {
+    return interaction.reply({
+      content: "⏳ O ticket já está sendo criado, aguarde...",
+      ephemeral: true,
+    });
+  }
+
+  ticketsEmCriacao.add(targetUserId);
 
   try {
-    const ticketExistente = await procurarTicketAberto(guild, user.id);
+    const ticketExistente = await procurarTicketAberto(guild, targetUserId);
 
     if (ticketExistente) {
       return interaction.reply({
-        content: `❌ Você já possui um ticket aberto: ${ticketExistente}`,
+        content: `❌ Já existe um ticket aberto: ${ticketExistente}`,
         ephemeral: true,
       });
     }
@@ -194,7 +247,7 @@ async function criarTicket(interaction) {
         deny: [PermissionsBitField.Flags.ViewChannel],
       },
       {
-        id: user.id,
+        id: targetUserId,
         allow: [
           PermissionsBitField.Flags.ViewChannel,
           PermissionsBitField.Flags.SendMessages,
@@ -216,38 +269,42 @@ async function criarTicket(interaction) {
     }
 
     const canal = await guild.channels.create({
-      name: nomeTicket(user.id),
+      name: nomeTicket(targetUserId),
       type: ChannelType.GuildText,
       parent: CATEGORIA_TICKETS_ID || null,
-      topic: `ticketUser:${user.id};assumidoPor:nenhum`,
+      topic: `ticketUser:${targetUserId};assumidoPor:nenhum`,
       permissionOverwrites: overwrites,
     });
 
     const embed = new EmbedBuilder()
-      .setTitle("🎫 Ticket Aberto")
+      .setTitle(userId ? "🔓 Ticket Reaberto" : "🎫 Ticket Aberto")
       .setDescription(
         [
-          `Olá ${user}, seu ticket foi criado com sucesso.`,
+          `Olá ${userObj}, seu ticket foi ${userId ? "reaberto" : "criado"} com sucesso.`,
           "",
           "Explique aqui o que você precisa.",
-          CARGO_ATENDIMENTO_ID ? `<@&${CARGO_ATENDIMENTO_ID}> foi avisado.` : "Equipe avisada.",
+          "",
+          CARGO_ATENDIMENTO_ID
+            ? `<@&${CARGO_ATENDIMENTO_ID}> foi avisado.`
+            : "Equipe avisada.",
         ].join("\n")
       )
       .setColor(0xff2b2b)
       .setTimestamp();
 
     await canal.send({
-      content: `${user}`,
+      content: `${userObj}`,
       embeds: [embed],
       components: [criarBotoesTicket()],
     });
 
     return interaction.reply({
-      content: `✅ Ticket criado com sucesso: ${canal}`,
+      content: `✅ Ticket ${userId ? "reaberto" : "criado"} com sucesso: ${canal}`,
       ephemeral: true,
     });
   } catch (error) {
     console.error("Erro ao criar ticket:", error);
+
     if (!interaction.replied && !interaction.deferred) {
       return interaction.reply({
         content: "❌ Erro ao criar o ticket.",
@@ -255,7 +312,7 @@ async function criarTicket(interaction) {
       });
     }
   } finally {
-    ticketsEmCriacao.delete(user.id);
+    ticketsEmCriacao.delete(targetUserId);
   }
 }
 
@@ -278,6 +335,7 @@ async function assumirTicket(interaction) {
   }
 
   const topico = canal.topic || "";
+
   if (topico.includes(`assumidoPor:${interaction.user.id}`)) {
     return interaction.reply({
       content: "ℹ️ Você já assumiu este ticket.",
@@ -285,7 +343,11 @@ async function assumirTicket(interaction) {
     });
   }
 
-  const novoTopico = topico.replace(/assumidoPor:[^;]+/i, `assumidoPor:${interaction.user.id}`);
+  const novoTopico = topico.replace(
+    /assumidoPor:[^;]+/i,
+    `assumidoPor:${interaction.user.id}`
+  );
+
   await canal.setTopic(novoTopico).catch(() => null);
 
   await canal.send({
@@ -309,20 +371,30 @@ async function buscarMensagens(channel) {
   const todas = [];
 
   while (true) {
-    const lote = await channel.messages.fetch({ limit: 100, before }).catch(() => null);
-    if (!lote || lote.size === 0) break;
+    const lote = await channel.messages
+      .fetch({ limit: 100, before })
+      .catch(() => null);
+
+    if (!lote || lote.size === 0) {
+      break;
+    }
 
     todas.push(...lote.values());
     before = lote.last().id;
 
-    if (lote.size < 100) break;
-    if (todas.length >= 1000) break;
+    if (lote.size < 100) {
+      break;
+    }
+
+    if (todas.length >= 1000) {
+      break;
+    }
   }
 
   return todas.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 }
 
-async function gerarPDF(channel, fechadoPor) {
+async function gerarPDF(channel, fechadoPor, motivo) {
   const mensagens = await buscarMensagens(channel);
 
   return new Promise((resolve, reject) => {
@@ -338,6 +410,8 @@ async function gerarPDF(channel, fechadoPor) {
     doc.fontSize(10).text(`Canal: #${channel.name}`);
     doc.text(`Fechado por: ${fechadoPor.tag}`);
     doc.text(`Data: ${new Date().toLocaleString("pt-BR")}`);
+    doc.moveDown(0.5);
+    doc.fontSize(11).text(`Motivo do fechamento: ${limparTexto(motivo) || "Não informado"}`);
     doc.moveDown();
 
     if (mensagens.length === 0) {
@@ -346,18 +420,16 @@ async function gerarPDF(channel, fechadoPor) {
       for (const msg of mensagens) {
         const data = new Date(msg.createdTimestamp).toLocaleString("pt-BR");
         const autor = msg.author ? msg.author.tag : "Desconhecido";
-        const texto = (msg.content || "[sem texto]").replace(/\s+/g, " ").trim();
+        const texto = limparTexto(msg.content || "[sem texto]");
         const anexos =
           msg.attachments.size > 0
             ? ` | anexos: ${[...msg.attachments.values()].map((a) => a.url).join(", ")}`
             : "";
 
-        doc
-          .fontSize(9)
-          .text(`[${data}] ${autor}: ${texto}${anexos}`, {
-            width: 520,
-            align: "left",
-          });
+        doc.fontSize(9).text(`[${data}] ${autor}: ${texto}${anexos}`, {
+          width: 520,
+          align: "left",
+        });
         doc.moveDown(0.25);
       }
     }
@@ -366,15 +438,25 @@ async function gerarPDF(channel, fechadoPor) {
   });
 }
 
-async function fecharTicketComTranscript(channel, user) {
-  const pdf = await gerarPDF(channel, user);
+async function fecharTicketComTranscriptComMotivo(channel, user, motivo) {
+  const ticketUserId = extrairTicketUserId(channel.topic);
+
+  const pdf = await gerarPDF(channel, user, motivo);
   const arquivo = new AttachmentBuilder(pdf, {
     name: `transcript-${channel.name}.pdf`,
   });
 
   const embed = new EmbedBuilder()
-    .setTitle("📄 Transcript do Ticket")
-    .setDescription(`Canal: **#${channel.name}**\nFechado por: ${user}`)
+    .setTitle("📄 Ticket Finalizado")
+    .setDescription(
+      [
+        `Canal: **#${channel.name}**`,
+        `Fechado por: ${user}`,
+        "",
+        `**Motivo:**`,
+        motivo,
+      ].join("\n")
+    )
     .setColor(0xff2b2b)
     .setTimestamp();
 
@@ -384,16 +466,23 @@ async function fecharTicketComTranscript(channel, user) {
       .catch(() => null);
 
     if (canalTranscript && canalTranscript.isTextBased()) {
-      await canalTranscript.send({
+      const payload = {
         embeds: [embed],
         files: [arquivo],
-      }).catch(console.error);
+      };
+
+      if (ticketUserId) {
+        payload.components = [criarBotaoReabrir(ticketUserId)];
+      }
+
+      await canalTranscript.send(payload).catch(console.error);
     }
   }
 
-  await channel.send("🔒 Fechando ticket em 3 segundos...");
-  setTimeout(async () => {
-    await channel.delete().catch(() => null);
+  await channel.send(`🔒 Ticket fechado por ${user}\n📌 Motivo: ${motivo}`);
+
+  setTimeout(() => {
+    channel.delete().catch(() => null);
   }, 3000);
 }
 
@@ -414,7 +503,9 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === "painel") {
         await interaction.deferReply({ ephemeral: true });
+
         const resultado = await criarOuAtualizarPainelFixo(interaction.guild);
+
         await interaction.editReply({
           content:
             resultado.type === "created"
@@ -431,6 +522,7 @@ client.on("interactionCreate", async (interaction) => {
 
       if (interaction.commandName === "fechar") {
         const nome = interaction.channel?.name || "";
+
         if (!nome.startsWith("ticket-")) {
           return interaction.reply({
             content: "❌ Esse comando só pode ser usado em ticket.",
@@ -438,9 +530,21 @@ client.on("interactionCreate", async (interaction) => {
           });
         }
 
-        await interaction.deferReply({ ephemeral: true });
-        await interaction.editReply("📄 Gerando transcript e fechando ticket...");
-        await fecharTicketComTranscript(interaction.channel, interaction.user);
+        const modal = new ModalBuilder()
+          .setCustomId("modal_fechar_ticket")
+          .setTitle("Fechar Ticket");
+
+        const motivoInput = new TextInputBuilder()
+          .setCustomId("motivo")
+          .setLabel("Qual o motivo do fechamento?")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setPlaceholder("Ex: problema resolvido, atendimento finalizado...");
+
+        const row = new ActionRowBuilder().addComponents(motivoInput);
+        modal.addComponents(row);
+
+        await interaction.showModal(modal);
         return;
       }
     }
@@ -456,8 +560,9 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      if (interaction.customId === "fechar_ticket") {
+      if (interaction.customId === "fechar_ticket_modal") {
         const nome = interaction.channel?.name || "";
+
         if (!nome.startsWith("ticket-")) {
           return interaction.reply({
             content: "❌ Esse botão só funciona em ticket.",
@@ -465,12 +570,74 @@ client.on("interactionCreate", async (interaction) => {
           });
         }
 
+        const modal = new ModalBuilder()
+          .setCustomId("modal_fechar_ticket")
+          .setTitle("Fechar Ticket");
+
+        const motivoInput = new TextInputBuilder()
+          .setCustomId("motivo")
+          .setLabel("Qual o motivo do fechamento?")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setPlaceholder("Ex: problema resolvido, atendimento finalizado...");
+
+        const row = new ActionRowBuilder().addComponents(motivoInput);
+        modal.addComponents(row);
+
+        await interaction.showModal(modal);
+        return;
+      }
+
+      if (interaction.customId.startsWith("reabrir_ticket:")) {
+        if (!staffTemPermissao(interaction.member)) {
+          return interaction.reply({
+            content: "❌ Você não tem permissão para reabrir tickets.",
+            ephemeral: true,
+          });
+        }
+
+        const [, ticketUserId] = interaction.customId.split(":");
+
+        const ticketExistente = await procurarTicketAberto(
+          interaction.guild,
+          ticketUserId
+        );
+
+        if (ticketExistente) {
+          return interaction.reply({
+            content: `❌ Já existe um ticket aberto para esse usuário: ${ticketExistente}`,
+            ephemeral: true,
+          });
+        }
+
+        await criarTicket(interaction, ticketUserId);
+        return;
+      }
+    }
+
+    if (interaction.isModalSubmit()) {
+      if (interaction.customId === "modal_fechar_ticket") {
+        const nome = interaction.channel?.name || "";
+
+        if (!nome.startsWith("ticket-")) {
+          return interaction.reply({
+            content: "❌ Isso só funciona em ticket.",
+            ephemeral: true,
+          });
+        }
+
+        const motivo = interaction.fields.getTextInputValue("motivo");
+
         await interaction.reply({
           content: "📄 Gerando transcript e fechando ticket...",
           ephemeral: true,
         });
 
-        await fecharTicketComTranscript(interaction.channel, interaction.user);
+        await fecharTicketComTranscriptComMotivo(
+          interaction.channel,
+          interaction.user,
+          motivo
+        );
         return;
       }
     }
@@ -478,10 +645,12 @@ client.on("interactionCreate", async (interaction) => {
     console.error("Erro em interactionCreate:", error);
 
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: "❌ Ocorreu um erro ao executar essa ação.",
-        ephemeral: true,
-      }).catch(() => null);
+      await interaction
+        .reply({
+          content: "❌ Ocorreu um erro ao executar essa ação.",
+          ephemeral: true,
+        })
+        .catch(() => null);
     }
   }
 });
