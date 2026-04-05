@@ -10,14 +10,13 @@ const {
   EmbedBuilder,
   SlashCommandBuilder,
   REST,
-  Routes
+  Routes,
 } = require("discord.js");
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-// IDs opcionais por variável de ambiente
 const CANAL_ENTRADA_ID = process.env.CANAL_ENTRADA_ID || "";
 const CANAL_SAIDA_ID = process.env.CANAL_SAIDA_ID || "";
 const CATEGORIA_TICKETS_ID = process.env.CATEGORIA_TICKETS_ID || "";
@@ -25,8 +24,7 @@ const CARGO_ATENDIMENTO_ID = process.env.CARGO_ATENDIMENTO_ID || "";
 const CARGO_MEMBRO_ID = process.env.CARGO_MEMBRO_ID || "";
 
 if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
-  console.log("Faltam variáveis obrigatórias:");
-  console.log("TOKEN, CLIENT_ID e GUILD_ID");
+  console.error("Faltam variáveis obrigatórias: TOKEN, CLIENT_ID e GUILD_ID");
   process.exit(1);
 }
 
@@ -34,15 +32,15 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages
+    GatewayIntentBits.GuildMessages,
   ],
-  partials: [Partials.Channel]
+  partials: [Partials.Channel],
 });
 
 const commands = [
   new SlashCommandBuilder()
     .setName("painel")
-    .setDescription("Envia o painel principal com ticket, entrada e saída"),
+    .setDescription("Envia o painel com ticket, entrada e saída"),
 
   new SlashCommandBuilder()
     .setName("fechar")
@@ -50,37 +48,36 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("entrada")
-    .setDescription("Envia manualmente uma mensagem de entrada")
-    .addUserOption(option =>
-      option.setName("usuario")
-        .setDescription("Usuário que entrou")
+    .setDescription("Registra entrada manualmente")
+    .addUserOption((option) =>
+      option
+        .setName("usuario")
+        .setDescription("Usuário para registrar entrada")
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("saida")
-    .setDescription("Envia manualmente uma mensagem de saída")
-    .addUserOption(option =>
-      option.setName("usuario")
-        .setDescription("Usuário que saiu")
+    .setDescription("Registra saída manualmente")
+    .addUserOption((option) =>
+      option
+        .setName("usuario")
+        .setDescription("Usuário para registrar saída")
         .setRequired(true)
-    )
-].map(cmd => cmd.toJSON());
+    ),
+].map((cmd) => cmd.toJSON());
 
 async function registrarComandos() {
-  try {
-    const rest = new REST({ version: "10" }).setToken(TOKEN);
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-    console.log("Comandos slash registrados com sucesso.");
-  } catch (error) {
-    console.error("Erro ao registrar comandos:", error);
-  }
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
+    body: commands,
+  });
+
+  console.log("Comandos registrados com sucesso.");
 }
 
-function criarPainelEmbed() {
+function criarEmbedPainel() {
   return new EmbedBuilder()
     .setTitle("📋 Painel de Atendimento")
     .setDescription(
@@ -88,20 +85,16 @@ function criarPainelEmbed() {
         "Selecione uma opção abaixo:",
         "",
         "🎫 **Abrir Ticket**",
-        "Faça um atendimento privado com a equipe.",
-        "",
-        "✅ **Entrada**",
-        "Confirma sua chegada no servidor.",
-        "",
-        "📤 **Saída**",
-        "Registra sua saída."
+        "✅ **Registrar Entrada**",
+        "📤 **Registrar Saída**",
       ].join("\n")
     )
-    .setFooter({ text: "CBM BOT • Sistema de Atendimento" })
-    .setTimestamp();
+    .setColor(0x2b2d31)
+    .setTimestamp()
+    .setFooter({ text: "CBM BOT" });
 }
 
-function criarPainelBotoes() {
+function criarBotoesPainel() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("abrir_ticket")
@@ -134,46 +127,54 @@ function criarBotaoFechar() {
 }
 
 async function procurarTicketAberto(guild, userId) {
-  const canais = await guild.channels.fetch();
+  const channels = await guild.channels.fetch();
 
-  return canais.find(channel =>
-    channel &&
-    channel.type === ChannelType.GuildText &&
-    channel.name.includes(userId)
-  );
+  return channels.find((channel) => {
+    return (
+      channel &&
+      channel.type === ChannelType.GuildText &&
+      channel.name.endsWith(userId)
+    );
+  });
+}
+
+function normalizarNomeCanal(user) {
+  const base = `ticket-${user.username}-${user.id}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 90);
+
+  return base;
 }
 
 async function criarTicket(interaction) {
-  const { guild, user, member } = interaction;
+  const { guild, user } = interaction;
 
   const ticketExistente = await procurarTicketAberto(guild, user.id);
   if (ticketExistente) {
-    return interaction.reply({
-      content: `❌ Você já possui um ticket aberto: ${ticketExistente}`,
-      ephemeral: true
+    await interaction.reply({
+      content: `❌ Você já tem um ticket aberto: ${ticketExistente}`,
+      ephemeral: true,
     });
+    return;
   }
-
-  const nomeCanal = `ticket-${user.username}-${user.id}`
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "")
-    .slice(0, 90);
 
   const permissionOverwrites = [
     {
       id: guild.roles.everyone.id,
-      deny: [
-        PermissionsBitField.Flags.ViewChannel
-      ]
+      deny: [PermissionsBitField.Flags.ViewChannel],
     },
     {
       id: user.id,
       allow: [
         PermissionsBitField.Flags.ViewChannel,
         PermissionsBitField.Flags.SendMessages,
-        PermissionsBitField.Flags.ReadMessageHistory
-      ]
-    }
+        PermissionsBitField.Flags.ReadMessageHistory,
+      ],
+    },
   ];
 
   if (CARGO_ATENDIMENTO_ID) {
@@ -183,16 +184,16 @@ async function criarTicket(interaction) {
         PermissionsBitField.Flags.ViewChannel,
         PermissionsBitField.Flags.SendMessages,
         PermissionsBitField.Flags.ReadMessageHistory,
-        PermissionsBitField.Flags.ManageChannels
-      ]
+        PermissionsBitField.Flags.ManageChannels,
+      ],
     });
   }
 
-  const canal = await guild.channels.create({
-    name: nomeCanal,
+  const channel = await guild.channels.create({
+    name: normalizarNomeCanal(user),
     type: ChannelType.GuildText,
     parent: CATEGORIA_TICKETS_ID || null,
-    permissionOverwrites
+    permissionOverwrites,
   });
 
   const embed = new EmbedBuilder()
@@ -202,20 +203,23 @@ async function criarTicket(interaction) {
         `Olá ${user}, seu ticket foi criado com sucesso.`,
         "",
         "Explique aqui o que você precisa.",
-        CARGO_ATENDIMENTO_ID ? `<@&${CARGO_ATENDIMENTO_ID}>` : "Equipe de atendimento foi avisada."
+        CARGO_ATENDIMENTO_ID
+          ? `<@&${CARGO_ATENDIMENTO_ID}> foi avisado.`
+          : "A equipe foi avisada.",
       ].join("\n")
     )
+    .setColor(0x5865f2)
     .setTimestamp();
 
-  await canal.send({
+  await channel.send({
     content: `${user}`,
     embeds: [embed],
-    components: [criarBotaoFechar()]
+    components: [criarBotaoFechar()],
   });
 
   await interaction.reply({
-    content: `✅ Ticket criado com sucesso: ${canal}`,
-    ephemeral: true
+    content: `✅ Ticket criado com sucesso: ${channel}`,
+    ephemeral: true,
   });
 }
 
@@ -223,7 +227,11 @@ async function registrarEntrada(interaction, alvo = null) {
   const user = alvo || interaction.user;
   const guild = interaction.guild;
 
-  if (CARGO_MEMBRO_ID && user.id === interaction.user.id) {
+  const channel = CANAL_ENTRADA_ID
+    ? await guild.channels.fetch(CANAL_ENTRADA_ID).catch(() => null)
+    : interaction.channel;
+
+  if (CARGO_MEMBRO_ID) {
     const member = await guild.members.fetch(user.id).catch(() => null);
     if (member && !member.roles.cache.has(CARGO_MEMBRO_ID)) {
       await member.roles.add(CARGO_MEMBRO_ID).catch(() => null);
@@ -232,107 +240,122 @@ async function registrarEntrada(interaction, alvo = null) {
 
   const embed = new EmbedBuilder()
     .setTitle("✅ Registro de Entrada")
-    .setDescription(`${user} registrou entrada no servidor.`)
+    .setDescription(`${user} registrou entrada.`)
     .setThumbnail(user.displayAvatarURL())
+    .setColor(0x57f287)
     .setTimestamp();
 
-  const canal = CANAL_ENTRADA_ID
-    ? await guild.channels.fetch(CANAL_ENTRADA_ID).catch(() => null)
-    : interaction.channel;
-
-  if (canal && canal.isTextBased()) {
-    await canal.send({ embeds: [embed] });
+  if (channel && channel.isTextBased()) {
+    await channel.send({ embeds: [embed] });
   }
 
-  if (interaction.deferred || interaction.replied) return;
-  await interaction.reply({
-    content: "✅ Entrada registrada com sucesso.",
-    ephemeral: true
-  });
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.reply({
+      content: "✅ Entrada registrada com sucesso.",
+      ephemeral: true,
+    });
+  }
 }
 
 async function registrarSaida(interaction, alvo = null) {
   const user = alvo || interaction.user;
   const guild = interaction.guild;
 
-  const embed = new EmbedBuilder()
-    .setTitle("📤 Registro de Saída")
-    .setDescription(`${user} registrou saída do servidor.`)
-    .setThumbnail(user.displayAvatarURL())
-    .setTimestamp();
-
-  const canal = CANAL_SAIDA_ID
+  const channel = CANAL_SAIDA_ID
     ? await guild.channels.fetch(CANAL_SAIDA_ID).catch(() => null)
     : interaction.channel;
 
-  if (canal && canal.isTextBased()) {
-    await canal.send({ embeds: [embed] });
+  const embed = new EmbedBuilder()
+    .setTitle("📤 Registro de Saída")
+    .setDescription(`${user} registrou saída.`)
+    .setThumbnail(user.displayAvatarURL())
+    .setColor(0xed4245)
+    .setTimestamp();
+
+  if (channel && channel.isTextBased()) {
+    await channel.send({ embeds: [embed] });
   }
 
-  if (interaction.deferred || interaction.replied) return;
-  await interaction.reply({
-    content: "📤 Saída registrada com sucesso.",
-    ephemeral: true
-  });
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.reply({
+      content: "📤 Saída registrada com sucesso.",
+      ephemeral: true,
+    });
+  }
 }
 
 client.once("ready", async () => {
-  console.log(`✅ Bot online como ${client.user.tag}`);
-  await registrarComandos();
+  console.log(`Bot online como ${client.user.tag}`);
+
+  try {
+    await registrarComandos();
+  } catch (error) {
+    console.error("Erro ao registrar comandos:", error);
+  }
 });
 
-client.on("guildMemberAdd", async member => {
+client.on("guildMemberAdd", async (member) => {
   if (!CANAL_ENTRADA_ID) return;
 
-  const canal = await member.guild.channels.fetch(CANAL_ENTRADA_ID).catch(() => null);
-  if (!canal || !canal.isTextBased()) return;
+  const channel = await member.guild.channels
+    .fetch(CANAL_ENTRADA_ID)
+    .catch(() => null);
+
+  if (!channel || !channel.isTextBased()) return;
 
   const embed = new EmbedBuilder()
-    .setTitle("👋 Bem-vindo(a)!")
+    .setTitle("👋 Bem-vindo(a)")
     .setDescription(`${member} entrou no servidor.`)
     .setThumbnail(member.user.displayAvatarURL())
+    .setColor(0x57f287)
     .setTimestamp();
 
-  await canal.send({ embeds: [embed] }).catch(() => null);
+  await channel.send({ embeds: [embed] }).catch(() => null);
 
   if (CARGO_MEMBRO_ID) {
     await member.roles.add(CARGO_MEMBRO_ID).catch(() => null);
   }
 });
 
-client.on("guildMemberRemove", async member => {
+client.on("guildMemberRemove", async (member) => {
   if (!CANAL_SAIDA_ID) return;
 
-  const canal = await member.guild.channels.fetch(CANAL_SAIDA_ID).catch(() => null);
-  if (!canal || !canal.isTextBased()) return;
+  const channel = await member.guild.channels
+    .fetch(CANAL_SAIDA_ID)
+    .catch(() => null);
+
+  if (!channel || !channel.isTextBased()) return;
 
   const embed = new EmbedBuilder()
     .setTitle("📤 Membro saiu")
     .setDescription(`**${member.user.tag}** saiu do servidor.`)
     .setThumbnail(member.user.displayAvatarURL())
+    .setColor(0xed4245)
     .setTimestamp();
 
-  await canal.send({ embeds: [embed] }).catch(() => null);
+  await channel.send({ embeds: [embed] }).catch(() => null);
 });
 
-client.on("interactionCreate", async interaction => {
+client.on("interactionCreate", async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === "painel") {
         await interaction.reply({
-          embeds: [criarPainelEmbed()],
-          components: [criarPainelBotoes()]
+          embeds: [criarEmbedPainel()],
+          components: [criarBotoesPainel()],
         });
         return;
       }
 
       if (interaction.commandName === "fechar") {
-        const nome = interaction.channel.name || "";
-        if (!nome.startsWith("ticket-")) {
-          return interaction.reply({
-            content: "❌ Esse comando só pode ser usado dentro de ticket.",
-            ephemeral: true
+        const name = interaction.channel?.name || "";
+
+        if (!name.startsWith("ticket-")) {
+          await interaction.reply({
+            content: "❌ Esse comando só pode ser usado dentro de um ticket.",
+            ephemeral: true,
           });
+          return;
         }
 
         await interaction.reply("🔒 Fechando ticket em 3 segundos...");
@@ -372,28 +395,33 @@ client.on("interactionCreate", async interaction => {
       }
 
       if (interaction.customId === "fechar_ticket") {
-        const nome = interaction.channel.name || "";
-        if (!nome.startsWith("ticket-")) {
-          return interaction.reply({
+        const name = interaction.channel?.name || "";
+
+        if (!name.startsWith("ticket-")) {
+          await interaction.reply({
             content: "❌ Esse botão só funciona em tickets.",
-            ephemeral: true
+            ephemeral: true,
           });
+          return;
         }
 
-        await interaction.reply("🔒 Fechando ticket em 3 segundos...");
+        await interaction.reply({
+          content: "🔒 Fechando ticket em 3 segundos...",
+          ephemeral: false,
+        });
+
         setTimeout(async () => {
           await interaction.channel.delete().catch(() => null);
         }, 3000);
-        return;
       }
     }
   } catch (error) {
-    console.error("Erro no interactionCreate:", error);
+    console.error("Erro na interaction:", error);
 
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
       await interaction.reply({
         content: "❌ Ocorreu um erro ao executar essa ação.",
-        ephemeral: true
+        ephemeral: true,
       }).catch(() => null);
     }
   }
