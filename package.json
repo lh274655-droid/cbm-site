@@ -1,7 +1,7 @@
 {
   "name": "cbm-bot",
   "version": "1.0.0",
-  "description": "Bot Discord com ticket e entrada/saida automática",
+  "description": "Bot Discord com painel fixo de ticket",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
